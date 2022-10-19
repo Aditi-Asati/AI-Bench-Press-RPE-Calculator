@@ -4,6 +4,7 @@ import tkinter as tk
 import PIL.Image, PIL.ImageTk
 import camera
 import model
+import time
 
 
 class App:
@@ -22,7 +23,7 @@ class App:
         self.last_prediction = 0
 
         self.model = model.Model()
-
+        self.rep_times = []
         self.counting_enabled = False
         self.camera = camera.Camera()
         
@@ -41,20 +42,13 @@ class App:
         self.canvas = tk.Canvas(self.window, width=self.camera.width, height=self.camera.height)
         self.canvas.pack()
 
+        self.btn_train = tk.Button(self.window, text = "Train Model", width=50, command=self.model.train_model)
+        self.btn_train.pack(anchor = tk.CENTER, expand=True) 
+
+
         self.btn_toggleauto = tk.Button(self.window, text = "Toggle Counting", width=50, command=self.counting_toggle)
         self.btn_toggleauto.pack(anchor = tk.CENTER, expand=True)
 
-        self.btn_class_one = tk.Button(self.window, text = "Extended", width=50, command= lambda: self.save_for_class(1))
-        self.btn_class_one.pack(anchor = tk.CENTER, expand=True) 
-        # when we click this button, the program is going to take a snapshot of the current image that we are seeing and put this into the directory which contains all "extended" arms images for the training set  
-
-        self.btn_class_two = tk.Button(self.window, text = "Contracted", width=50, command= lambda: self.save_for_class(2))
-        self.btn_class_two.pack(anchor = tk.CENTER, expand=True) 
-        # when we click this button, the program is going to take a snapshot of the current image that we are seeing and put this into the directory which contains all "contracted" arms images for the training set  
-
-        self.btn_train = tk.Button(self.window, text = "Train Model", width=50, command= lambda: self.model.train_model(self.counters))
-        self.btn_train.pack(anchor = tk.CENTER, expand=True) 
-        # As soon as we press this button, the program will train the model on the training set of the extended and contracted images of the arm
 
         self.btn_reset = tk.Button(self.window, text = "Reset", width=50, command= lambda: self.reset)
         self.btn_reset.pack(anchor = tk.CENTER, expand=True) 
@@ -63,6 +57,12 @@ class App:
         self.counter_label.config(font=("Arial", 24))
         self.counter_label.pack(anchor = tk.CENTER, expand=True) 
 
+        self.btn_reset = tk.Button(self.window, text = "Calculate RPE", width=50, command= self.RPE_calc)
+        self.btn_reset.pack(anchor = tk.CENTER, expand=True) 
+
+        self.RPE_label = tk.Label(self.window)
+        self.RPE_label.config(font=("Arial", 24))
+        self.RPE_label.pack(anchor = tk.CENTER, expand=True) 
 
     def update(self):
         """
@@ -96,12 +96,15 @@ class App:
         prediction = self.model.predict(frame)
 
         if prediction != self.last_prediction:
+            rep_time = time.time()
             if prediction == 1:
-                self.extended = True
-                self.last_prediction = 1
-            if prediction == 2:
                 self.contracted = True
-                self.last_prediction = 2
+                self.last_prediction = 1
+                self.rep_times.append(f"1_{rep_time}")
+            elif prediction == 0:
+                self.extended = True
+                self.last_prediction = 0
+                self.rep_times.append(f"0_{rep_time}")
 
     def counting_toggle(self):
         """
@@ -109,34 +112,34 @@ class App:
         """
         self.counting_enabled = not self.counting_enabled
 
-    def save_for_class(self, class_num):
-        """
-        saves the current image after converting it into black & white image and resizing it using PIL in the respective directories depending on the class (either "extended" or "contracted")
-        """
-        ret,  frame = self.camera.get_frame()
-
-        if not os.path.exists("1"):
-            os.mkdir("1")
-
-        if not os.path.exists("2"):
-            os.mkdir("2")
-
-        # saving the image in the given directory and converting it into black and white
-        cv2.imwrite(f"{class_num}/frame{self.counters[class_num-1]}.jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY))
-
-        # opening the image using PIL
-        img = PIL.Image.open(f"{class_num}/frame{self.counters[class_num-1]}.jpg")
-
-        # resizing the image so that the model does not have to perform unnecessary computations
-        img.thumbnail((150,150), PIL.Image.ANTIALIAS)
-
-        # saving the image again using PIL
-        img.save(f"{class_num}/frame{self.counters[class_num-1]}.jpg")
-
-        self.counters[class_num-1] += 1
 
     def reset(self):
         """
         sets the number of reps to 0
         """
         self.rep_counter = 0
+
+    def RPE_calc(self):
+        """
+        Calculates the RPE based on VL(velocity Loss) and REP% which is the percentage of repetitions completed (%REP) with respect to the maximum possible number over each analysis interval
+        """
+        self.times = []
+        if self.rep_times[0].split("_")[0] == 0:
+            for i in range(0, len(self.rep_times), 2):
+                time = abs(float(self.rep_times[i].split("_")[-1]) - float(self.rep_times[i+1].split("_")[-1]))
+                self.times.append(time)
+
+        elif self.rep_times[0].split("_")[0] == 1:
+            for i in range(1, len(self.rep_times), 2):
+                time = abs(float(self.rep_times[i].split("_")[-1]) - float(self.rep_times[i+1].split("_")[-1]))
+                self.times.append(time)
+
+        self.distance = 1.0
+        self.MV_Best = self.distance/min(self.times)
+        self.MV_Last = self.distance/self.times[-1]
+        self.VL = 100*((self.MV_Best - self.MV_Last)/self.MV_Best)
+        self.max_reps = 15
+        self.perf_reps = len(self.times)
+        self.REP_percent = 100*(self.perf_reps/self.max_reps)
+        
+        self.RPE_label.config(text = f"{self.RPE}")
