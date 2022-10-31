@@ -1,4 +1,6 @@
 {
     "distance" : 1.0,
-    "max_reps" : 15
+    "max_reps" : 15,
+    "Weight" : 35,
+    "Exercise" : "BP"
 }
